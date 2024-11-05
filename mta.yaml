@@ -1,0 +1,130 @@
+_schema-version: 3.3.0
+ID: Hands-on-external-services
+description: A simple CAP project.
+version: 1.0.0
+modules:
+- name: Hands-on-external-services-srv
+  type: nodejs
+  path: gen/srv
+  requires:
+  - name: Hands-on-external-services-auth
+  - name: Hands-on-external-services-destination
+  - name: Hands-on-external-services-db
+  - name: Hands-on-external-service-connectivity
+  provides:
+  - name: srv-api
+    properties:
+      srv-url: ${default-url}
+  parameters:
+    buildpack: nodejs_buildpack
+    readiness-health-check-http-endpoint: /health
+    readiness-health-check-type: http
+  build-parameters:
+    builder: npm
+- name: Hands-on-external-services
+  type: approuter.nodejs
+  path: app
+  requires:
+  - name: srv-api
+    group: destinations
+    properties:
+      forwardAuthToken: true
+      name: srv-api
+      url: ~{srv-url}
+  - name: Hands-on-external-services-auth
+  - name: Hands-on-external-services-destination
+  parameters:
+    disk-quota: 256M
+    keep-existing-routes: true
+    memory: 256M
+- name: Hands-on-external-services-db-deployer
+  type: hdb
+  path: gen/db
+  requires:
+  - name: Hands-on-external-services-db
+  parameters:
+    buildpack: nodejs_buildpack
+- name: Hands-on-external-services-app-content
+  type: com.sap.application.content
+  path: .
+  requires:
+  - name: Hands-on-external-services-repo-host
+    parameters:
+      content-target: true
+  build-parameters:
+    build-result: resources
+    requires:
+    - artifacts:
+      - externalservice.zip
+      name: externalservice
+      target-path: resources/
+- name: externalservice
+  type: html5
+  path: app/externalservice
+  build-parameters:
+    build-result: dist
+    builder: custom
+    commands:
+    - npm install
+    - npm run build:cf
+    supported-platforms: []
+resources:
+- name: Hands-on-external-services-auth
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      oauth2-configuration:
+        redirect-uris:
+        - https://053e813dtrial-dev-hands-on-external-services.cfapps.us10-001.hana.ondemand.com/login/callback
+      role-collections:
+      - description: Manage
+        name: Admin-${org}-${space}
+        role-template-references:
+        - $XSAPPNAME.Admin
+      tenant-mode: dedicated
+      xsappname: Hands-on-external-services-${org}-${space}
+    path: ./xs-security.json
+    service: xsuaa
+    service-plan: application
+- name: Hands-on-external-services-destination
+  type: org.cloudfoundry.managed-service
+  parameters:
+    config:
+      HTML5Runtime_enabled: false
+      init_data:
+        instance:
+          destinations:
+          - Authentication: NoAuthentication
+            Name: ui5
+            ProxyType: Internet
+            Type: HTTP
+            URL: https://ui5.sap.com
+          existing_destinations_policy: update
+    service: destination
+    service-plan: lite
+- name: Hands-on-external-service-connectivity
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: connectivity
+    service-name: Hands-on-external-service-connectivity
+    service-plan: lite
+- name: Hands-on-external-services-db
+  type: com.sap.xs.hdi-container
+  parameters:
+    service: hana
+    service-plan: hdi-shared
+- name: Hands-on-external-services-repo-host
+  type: org.cloudfoundry.managed-service
+  parameters:
+    service: html5-apps-repo
+    service-name: Hands-on-external-services-html5-srv
+    service-plan: app-host
+parameters:
+  deploy_mode: html5-repo
+  enable-parallel-deployments: true
+build-parameters:
+  before-all:
+  - builder: custom
+    commands:
+    - npm ci
+    - npx cds build --production
